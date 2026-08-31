@@ -1,0 +1,17 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "SampleStrategy smoke test",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}\\Strategy\\SampleStrategy\\main.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}\\.venv\\Scripts\\python.exe",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder};${workspaceFolder}\\tools\\lean_runtime_shim"
+      }
+    }
+  ]
+}

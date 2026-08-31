@@ -1,0 +1,17 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "LEAN: check environment",
+      "type": "shell",
+      "command": ".\\scripts\\check-env.ps1",
+      "problemMatcher": []
+    },
+    {
+      "label": "LEAN: backtest SampleStrategy",
+      "type": "shell",
+      "command": ".\\scripts\\lean.ps1 backtest \"SampleStrategy\"",
+      "problemMatcher": []
+    }
+  ]
+}

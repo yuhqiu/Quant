@@ -1,0 +1,13 @@
+{
+  "python.defaultInterpreterPath": "D:\\Quant\\.venv\\Scripts\\python.exe",
+  "python.analysis.extraPaths": [
+    "D:\\Quant\\.venv\\Lib\\site-packages",
+    "D:\\Quant\\tools\\lean_runtime_shim"
+  ],
+  "editor.semanticHighlighting.enabled": true,
+  "editor.occurrencesHighlight": "singleFile",
+  "editor.selectionHighlight": true,
+  "editor.bracketPairColorization.enabled": true,
+  "editor.guides.bracketPairs": "active",
+  "breadcrumbs.enabled": true
+}

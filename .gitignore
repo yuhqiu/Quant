@@ -1,0 +1,55 @@
+# --- Python ---
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# --- Market data lake (raw bars, catalog, reports, logs) ---
+DataSource/
+!DataSource/.gitkeep
+
+# --- Generated feature matrices ---
+Metrics/
+!Metrics/.gitkeep
+
+# --- Backtest artifacts ---
+Results/
+backtests/
+optimizations/
+reports/
+storage/
+data/
+
+# --- Data file formats: never commit datasets, wherever they land ---
+*.parquet
+*.duckdb
+*.duckdb.wal
+*.csv
+*.xlsx
+*.xls
+*.h5
+*.hdf5
+*.feather
+*.pkl
+*.db
+*.sqlite3
+# Small committed test fixtures are the one exception.
+!**/test/fixtures/**
+
+# --- Secrets ---
+.env
+.env.*
+*.key
+*.pem
+credentials.json
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+
