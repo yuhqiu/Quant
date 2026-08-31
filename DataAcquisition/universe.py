@@ -9,12 +9,15 @@ from pathlib import Path
 
 import pandas as pd
 
-from .config import REFERENCE_ROOT
+from . import config
 
 # The HTTPS mirror of this directory is frequently unavailable; the FTP one is stable.
 NASDAQ_TRADED_URL = "ftp://ftp.nasdaqtrader.com/SymbolDirectory/nasdaqtraded.txt"
 
-UNIVERSE_PATH = REFERENCE_ROOT / "universe.parquet"
+
+def universe_path() -> Path:
+    return config.REFERENCE_ROOT / "universe.parquet"
+
 
 ASSET_CLASSES = ("stock", "etf")
 
@@ -81,13 +84,15 @@ def build_universe(url: str = NASDAQ_TRADED_URL) -> pd.DataFrame:
     return universe.drop_duplicates(subset="symbol").sort_values("symbol").reset_index(drop=True)
 
 
-def save_universe(universe: pd.DataFrame, path: Path = UNIVERSE_PATH) -> Path:
+def save_universe(universe: pd.DataFrame, path: Path | None = None) -> Path:
+    path = path or universe_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     universe.to_parquet(path, engine="pyarrow", compression="zstd", index=False)
     return path
 
 
-def load_universe(path: Path = UNIVERSE_PATH) -> pd.DataFrame:
+def load_universe(path: Path | None = None) -> pd.DataFrame:
+    path = path or universe_path()
     if not path.exists():
         raise FileNotFoundError(
             f"no universe snapshot at {path}; run 'python -m DataAcquisition universe' first"
@@ -99,9 +104,10 @@ def symbols(
     asset_class: str = "stock",
     region: str = "US",
     refresh: bool = False,
-    path: Path = UNIVERSE_PATH,
+    path: Path | None = None,
 ) -> list[str]:
     """Symbols for one asset class, downloading a fresh snapshot when needed."""
+    path = path or universe_path()
     if refresh or not path.exists():
         save_universe(build_universe(), path)
     universe = load_universe(path)

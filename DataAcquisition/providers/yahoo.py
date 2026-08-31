@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, ClassVar, Mapping
+from collections.abc import Mapping
+from typing import Any, ClassVar
 
 import pandas as pd
 import yfinance as yf
@@ -38,6 +39,7 @@ class YahooProvider(MarketDataProvider):
     )
     max_batch_size: ClassVar[int] = 50
     request_pause: ClassVar[float] = 1.0
+    earliest_available: ClassVar[pd.Timestamp] = pd.Timestamp("1927-01-01", tz="UTC")
     # Yahoo silently truncates intraday history; clamping avoids empty responses.
     max_lookback: ClassVar[Mapping[str, pd.Timedelta]] = {
         "1m": pd.Timedelta(days=29),
@@ -71,28 +73,44 @@ class YahooProvider(MarketDataProvider):
         if not request.symbols:
             return result
 
-        window: dict[str, Any] = {}
-        if request.start is not None:
-            window["start"] = request.start.tz_convert("UTC").date().isoformat()
+        result = self._download(request.symbols, request, self.download_kwargs)
+        if result.errors:
+            # yfinance's price repair raises on some tickers; a plain retry recovers them.
+            retry_kwargs = {**self.download_kwargs, "repair": False}
+            for symbol in list(result.errors):
+                recovered = self._download((symbol,), request, retry_kwargs)
+                if symbol in recovered.frames:
+                    result.frames[symbol] = recovered.frames[symbol]
+                    del result.errors[symbol]
+        return result
+
+    def _download(
+        self,
+        symbols: tuple[str, ...],
+        request: FetchRequest,
+        download_kwargs: dict[str, Any],
+    ) -> FetchResult:
+        result = FetchResult()
+        # An explicit start beats period='max', which Yahoo rejects for recent listings.
+        start = request.start if request.start is not None else self.earliest_available
+        window: dict[str, Any] = {"start": start.tz_convert("UTC").date().isoformat()}
         if request.end is not None:
             window["end"] = request.end.tz_convert("UTC").date().isoformat()
-        if not window:
-            window["period"] = "max"
 
         try:
             raw = yf.download(
-                tickers=list(request.symbols),
+                tickers=list(symbols),
                 interval=request.interval,
                 group_by="ticker",  # required by _extract_symbol_frame
                 **window,
-                **self.download_kwargs,
+                **download_kwargs,
             )
         except Exception as exc:  # one bad batch must not abort the whole run
             message = f"{type(exc).__name__}: {exc}"
-            result.errors = {symbol: message for symbol in request.symbols}
+            result.errors = {symbol: message for symbol in symbols}
             return result
 
-        for symbol in request.symbols:
+        for symbol in symbols:
             frame = _extract_symbol_frame(raw, symbol) if raw is not None else None
             if frame is None:
                 result.errors[symbol] = "symbol missing from provider response"

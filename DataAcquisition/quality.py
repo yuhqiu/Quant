@@ -6,8 +6,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from . import catalog
-from .config import REPORT_ROOT
+from . import catalog, config
 from .lake import Partition
 
 _REPORT_SQL = """
@@ -50,7 +49,7 @@ def build_report(partition: Partition) -> pd.DataFrame:
 
 def report_path(partition: Partition) -> Path:
     return (
-        REPORT_ROOT
+        config.REPORT_ROOT
         / f"quality_{partition.region}_{partition.asset_class}_{partition.interval}.parquet"
     )
 

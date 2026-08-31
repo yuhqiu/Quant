@@ -135,7 +135,7 @@ def normalize_bars(frame: pd.DataFrame, symbol: str) -> pd.DataFrame:
     normalized["dividend"] = normalized["dividend"].fillna(0.0)
     normalized["split_ratio"] = normalized["split_ratio"].fillna(0.0)
 
-    repaired = normalized["repaired"] if "repaired" in normalized else False
+    repaired = normalized.get("repaired", False)
     normalized["repaired"] = pd.Series(repaired, index=normalized.index).astype(str).str.lower().isin(
         {"true", "1", "1.0", "yes"}
     )

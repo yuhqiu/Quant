@@ -12,15 +12,16 @@ from __future__ import annotations
 
 import os
 import re
-from dataclasses import dataclass
+from collections.abc import Iterable, Iterator
 from pathlib import Path
-from typing import Iterable, Iterator
 
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from .config import BARS_ROOT, PARQUET_COMPRESSION
+from Common.types import Partition
+
+from . import config
 from .schema import BAR_COLUMNS, BAR_SCHEMA, SYMBOL, TIMESTAMP, empty_bars
 
 _UNSAFE_CHARS = re.compile(r"[^A-Z0-9._-]")
@@ -28,22 +29,6 @@ _UNSAFE_CHARS = re.compile(r"[^A-Z0-9._-]")
 _RESERVED_NAMES = frozenset(
     {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}
 )
-
-
-@dataclass(frozen=True)
-class Partition:
-    region: str
-    asset_class: str
-    interval: str
-
-    @property
-    def path(self) -> Path:
-        return (
-            BARS_ROOT
-            / f"region={self.region}"
-            / f"asset_class={self.asset_class}"
-            / f"interval={self.interval}"
-        )
 
 
 def symbol_filename(symbol: str) -> str:
@@ -106,7 +91,7 @@ def write_symbol(frame: pd.DataFrame, symbol: str, partition: Partition) -> Path
     pq.write_table(
         table,
         temporary,
-        compression=PARQUET_COMPRESSION,
+        compression=config.PARQUET_COMPRESSION,
         # Splitting float bytes into planes lets zstd find structure: ~38% smaller.
         column_encoding={
             name: "BYTE_STREAM_SPLIT"
@@ -154,9 +139,9 @@ def _last_timestamp_from_rows(path: Path) -> pd.Timestamp | None:
 
 def iter_partitions() -> Iterator[Partition]:
     """Every partition that currently holds at least one parquet file."""
-    if not BARS_ROOT.is_dir():
+    if not config.BARS_ROOT.is_dir():
         return
-    for interval_dir in BARS_ROOT.glob("region=*/asset_class=*/interval=*"):
+    for interval_dir in config.BARS_ROOT.glob("region=*/asset_class=*/interval=*"):
         if not any(interval_dir.glob("*.parquet")):
             continue
         region, asset_class, interval = (part.split("=", 1)[1] for part in interval_dir.parts[-3:])

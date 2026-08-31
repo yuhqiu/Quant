@@ -1,45 +1,40 @@
-"""Shared test harness.
-
-Uses stdlib only, so it can be imported before ``QUANT_DATA_ROOT`` is set and the
-``DataAcquisition`` package is first imported (``config`` resolves paths at
-import time, so the env var has to be in place first).
-"""
+"""Test support for DataAcquisition."""
 
 from __future__ import annotations
 
-import sys
+import os
+import shutil
 import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
-def isolated_data_root(prefix: str) -> Path:
-    """Put the project on sys.path and point the lake at a throwaway directory."""
-    import os
+@contextmanager
+def isolated_data_root(prefix: str) -> Iterator[Path]:
+    """Point the lake at a throwaway directory, and put it back afterwards.
 
-    if str(PROJECT_ROOT) not in sys.path:
-        sys.path.insert(0, str(PROJECT_ROOT))
+    Every path in the project resolves through ``Common.config.settings()`` on
+    access, so redirecting the environment and clearing the cache is enough.
+    """
+    from Common import config
+
+    previous = os.environ.get("QUANT_DATA_ROOT")
     root = Path(tempfile.mkdtemp(prefix=prefix))
     os.environ["QUANT_DATA_ROOT"] = str(root)
-    return root
+    config.reset_settings()
+    try:
+        yield root
+    finally:
+        if previous is None:
+            os.environ.pop("QUANT_DATA_ROOT", None)
+        else:
+            os.environ["QUANT_DATA_ROOT"] = previous
+        config.reset_settings()
+        shutil.rmtree(root, ignore_errors=True)
 
 
-class Results:
-    def __init__(self) -> None:
-        self.passed: list[str] = []
-        self.failed: list[str] = []
-
-    def check(self, name: str, condition: bool, detail: object = "") -> None:
-        (self.passed if condition else self.failed).append(name)
-        status = "PASS" if condition else "FAIL"
-        print(f"  [{status}] {name}{(' -> ' + str(detail)) if detail else ''}")
-
-    def section(self, title: str) -> None:
-        print(f"\n== {title} ==")
-
-    def exit_code(self) -> int:
-        print(f"\n{len(self.passed)} passed, {len(self.failed)} failed")
-        if self.failed:
-            print("FAILURES: " + ", ".join(self.failed))
-        return 1 if self.failed else 0
+def live_tests_enabled() -> bool:
+    return os.environ.get("QUANT_LIVE_TESTS", "") == "1"

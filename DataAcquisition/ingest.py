@@ -9,13 +9,15 @@ from __future__ import annotations
 
 import time
 from collections import defaultdict
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Iterable, Literal, Sequence
+from typing import Literal
 
 import pandas as pd
 
-from . import catalog, lake, universe as universe_module
+from . import catalog, lake
+from . import universe as universe_module
 from .cleaning import clean_bars, merge_bars
 from .config import (
     DEFAULT_ASSET_CLASS,

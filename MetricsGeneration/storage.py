@@ -1,17 +1,28 @@
-"""Parquet storage helpers for the wide metric matrices (index = date, columns = symbols)."""
+"""Storage for the metrics stage: bars in from the lake, wide matrices out."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
 import pandas as pd
-import pyarrow as pa
-import pyarrow.parquet as pq
 
+from Common.io import INDEX_NAME, matrix_path, read_matrix, write_matrix
+from Common.types import Partition
+from DataAcquisition import read_symbol
 
-COMPRESSION = "zstd"
-INDEX_NAME = "date"
-FLOAT_ENCODING = "BYTE_STREAM_SPLIT"
+BAR_COLUMNS = (
+    "ts",
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
+    "adj_close",
+    "adj_factor",
+    "dividend",
+    "split_ratio",
+    "repaired",
+)
 
 _CSV_RENAMES = {
     "Open": "open",
@@ -22,9 +33,33 @@ _CSV_RENAMES = {
 }
 _REPAIRED_CSV_COLUMN = "Repaired?"
 
+__all__ = [
+    "BAR_COLUMNS",
+    "INDEX_NAME",
+    "load_bars",
+    "load_ohlcv",
+    "matrix_path",
+    "read_matrix",
+    "write_matrix",
+]
+
+
+def load_bars(symbol: str, partition: Partition) -> pd.DataFrame:
+    """One symbol from the parquet lake, indexed by UTC bar timestamp."""
+    frame = read_symbol(symbol, partition, columns=list(BAR_COLUMNS))
+    if frame.empty:
+        return pd.DataFrame()
+
+    timestamps = pd.to_datetime(frame["ts"], utc=True)
+    frame = frame.drop(columns=["ts"])
+    frame.index = pd.DatetimeIndex(timestamps, name=INDEX_NAME)
+    frame["repaired"] = frame["repaired"].astype("float64")
+    frame = frame.astype("float64")
+    return frame[~frame.index.duplicated(keep="last")].sort_index()
+
 
 def load_ohlcv(path: Path) -> pd.DataFrame:
-    """Read one cleaned OHLCV CSV into a lowercase frame with a sorted UTC DatetimeIndex."""
+    """Read one legacy OHLCV CSV into a lowercase frame with a sorted UTC index."""
     frame = pd.read_csv(path)
     if frame.empty:
         return pd.DataFrame()
@@ -46,31 +81,8 @@ def load_ohlcv(path: Path) -> pd.DataFrame:
         raise ValueError(f"{path.name}: missing columns {missing}")
 
     result = frame[list(_CSV_RENAMES.values())].astype("float64")
+    if "Adj Close" in frame.columns:
+        result["adj_close"] = pd.to_numeric(frame["Adj Close"], errors="coerce")
     result["repaired"] = repaired.astype("float64")
     result = result[~result.index.duplicated(keep="last")].sort_index()
     return result
-
-
-def write_matrix(frame: pd.DataFrame, path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    frame.index.name = INDEX_NAME
-    table = pa.Table.from_pandas(frame)
-    # Byte-stream-split splits float bytes into planes so zstd can find structure: ~38% smaller.
-    encoding = {
-        name: FLOAT_ENCODING for name in table.schema.names if name != INDEX_NAME
-    }
-    pq.write_table(
-        table,
-        path,
-        compression=COMPRESSION,
-        use_dictionary=False,
-        column_encoding=encoding,
-    )
-
-
-def read_matrix(path: Path, columns: list[str] | None = None) -> pd.DataFrame:
-    return pd.read_parquet(path, engine="pyarrow", columns=columns)
-
-
-def matrix_path(directory: Path, metric: str) -> Path:
-    return directory / f"{metric}.parquet"

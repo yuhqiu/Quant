@@ -1,0 +1,87 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "quant-research-platform"
+version = "0.1.0"
+description = "Acquisition -> features -> signals -> portfolio -> backtest -> evaluation"
+requires-python = ">=3.12"
+dependencies = [
+    "pandas>=2.2",
+    "pyarrow>=17.0",
+    "duckdb>=1.1",
+    "numpy>=1.26",
+]
+
+[project.optional-dependencies]
+acquire = ["yfinance>=0.2.40", "requests>=2.31"]
+metrics = ["scipy>=1.11"]
+report = ["matplotlib>=3.8"]
+dev = ["pytest>=8.0", "ruff>=0.5", "mypy>=1.10"]
+all = [
+    "yfinance>=0.2.40",
+    "requests>=2.31",
+    "scipy>=1.11",
+    "matplotlib>=3.8",
+    "pytest>=8.0",
+    "ruff>=0.5",
+    "mypy>=1.10",
+]
+
+[project.scripts]
+quant-acquire = "DataAcquisition.cli:main"
+quant-metrics = "MetricsGeneration.cli:main"
+quant-signals = "Signals.cli:main"
+quant-strategy = "Strategy.cli:main"
+quant-evaluate = "Evaluation.cli:main"
+
+[tool.setuptools]
+packages = [
+    "Common",
+    "DataAcquisition",
+    "DataAcquisition.providers",
+    "MetricsGeneration",
+    "Signals",
+    "Portfolio",
+    "Strategy",
+    "Strategy.BackTest",
+    "Evaluation",
+]
+
+[tool.pytest.ini_options]
+testpaths = [
+    "Common/test",
+    "DataAcquisition/test",
+    "MetricsGeneration/test",
+    "Signals/test",
+    "Portfolio/test",
+    "Strategy/test",
+    "Evaluation/test",
+]
+python_files = ["test_*.py"]
+addopts = "-q --strict-markers"
+markers = [
+    "live: hits real vendors or the real lake; skipped unless QUANT_LIVE_TESTS=1",
+    "slow: takes more than a few seconds",
+]
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["E501", "B008"]
+
+[tool.ruff.lint.per-file-ignores]
+# Both modules put the project root on sys.path so they can also run as scripts.
+"MetricsGeneration/metrics_generation.py" = ["E402"]
+"MetricsGeneration/cross_section.py" = ["E402"]
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+warn_unused_ignores = true
+disallow_untyped_defs = false

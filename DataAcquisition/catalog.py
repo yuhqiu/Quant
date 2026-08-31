@@ -7,16 +7,15 @@ the lake stays the single source of truth.
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Iterator, Sequence
 
 import duckdb
 import pandas as pd
 
-from .config import BARS_ROOT, CATALOG_PATH, REFERENCE_ROOT
-from . import lake
+from . import config, lake
 from .lake import Partition
 
 _STATE_DDL = """
@@ -60,8 +59,8 @@ class SymbolState:
 
 @contextmanager
 def connect(read_only: bool = False) -> Iterator[duckdb.DuckDBPyConnection]:
-    CATALOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    connection = duckdb.connect(str(CATALOG_PATH), read_only=read_only)
+    config.CATALOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    connection = duckdb.connect(str(config.CATALOG_PATH), read_only=read_only)
     try:
         if not read_only:
             connection.execute(_STATE_DDL)
@@ -73,15 +72,15 @@ def connect(read_only: bool = False) -> Iterator[duckdb.DuckDBPyConnection]:
 
 def ensure_views(connection: duckdb.DuckDBPyConnection) -> None:
     """(Re)create the ``bars`` and ``universe`` views if their files exist."""
-    if any(BARS_ROOT.glob("region=*/asset_class=*/interval=*/*.parquet")):
-        pattern = (BARS_ROOT / "**" / "*.parquet").as_posix()
+    if any(config.BARS_ROOT.glob("region=*/asset_class=*/interval=*/*.parquet")):
+        pattern = (config.BARS_ROOT / "**" / "*.parquet").as_posix()
         connection.execute(
             f"""
             CREATE OR REPLACE VIEW bars AS
             SELECT * FROM read_parquet('{pattern}', hive_partitioning = true, union_by_name = true)
             """
         )
-    universe_path = REFERENCE_ROOT / "universe.parquet"
+    universe_path = config.REFERENCE_ROOT / "universe.parquet"
     if universe_path.exists():
         connection.execute(
             f"CREATE OR REPLACE VIEW universe AS "

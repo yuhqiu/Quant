@@ -7,8 +7,8 @@ keep that fact explicit rather than silently mixing conventions.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 import pandas as pd
 

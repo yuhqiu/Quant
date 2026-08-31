@@ -2,15 +2,47 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "LEAN: check environment",
+      "label": "Quant: check environment",
       "type": "shell",
-      "command": ".\\scripts\\check-env.ps1",
+      "command": "${workspaceFolder}\\scripts\\check-env.ps1",
+      "options": { "cwd": "${workspaceFolder}" },
       "problemMatcher": []
     },
     {
-      "label": "LEAN: backtest SampleStrategy",
+      "label": "Quant: run tests",
       "type": "shell",
-      "command": ".\\scripts\\lean.ps1 backtest \"SampleStrategy\"",
+      "command": "${workspaceFolder}\\.venv\\Scripts\\python.exe -m pytest",
+      "options": { "cwd": "${workspaceFolder}" },
+      "group": { "kind": "test", "isDefault": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "Quant: update bars",
+      "type": "shell",
+      "command": "${workspaceFolder}\\.venv\\Scripts\\python.exe -m DataAcquisition update --interval 1d",
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": []
+    },
+    {
+      "label": "Quant: build feature panel",
+      "type": "shell",
+      "command": "${workspaceFolder}\\.venv\\Scripts\\python.exe -m MetricsGeneration build --incremental",
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": []
+    },
+    {
+      "label": "Quant: backtest momentum",
+      "type": "shell",
+      "command": "${workspaceFolder}\\.venv\\Scripts\\python.exe -m Strategy backtest --spec momentum",
+      "options": { "cwd": "${workspaceFolder}" },
+      "group": { "kind": "build", "isDefault": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "Quant: run full pipeline",
+      "type": "shell",
+      "command": "${workspaceFolder}\\scripts\\run-pipeline.ps1 -Strategy momentum",
+      "options": { "cwd": "${workspaceFolder}" },
       "problemMatcher": []
     }
   ]

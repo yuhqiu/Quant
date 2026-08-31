@@ -17,12 +17,12 @@ Acquisition -> Analysis/Cleaning -> Metrics/Features -> Signals -> Portfolio -> 
 |---|---|---|
 | Download & store raw market data | `DataAcquisition/` | Implemented |
 | Clean, validate, quality report | `DataAcquisition/` (`cleaning.py`, `quality.py`) | Implemented |
-| Derived indicators & panel features | `MetricsGeneration/` | Implemented, needs alignment (§5) |
-| Alpha signals from features | `Signals/` | To build |
-| Positions from signals | `Portfolio/` | To build |
-| Simulate P&L with costs | `Strategy/BackTest/` | To build |
-| Metrics, tearsheet, attribution | `Evaluation/` | To build |
-| Shared config, calendar, logging, IO | `Common/` | To build |
+| Derived indicators & panel features | `MetricsGeneration/` | Implemented |
+| Alpha signals from features | `Signals/` | Implemented |
+| Positions from signals | `Portfolio/` | Implemented |
+| Simulate P&L with costs | `Strategy/BackTest/` | Implemented |
+| Metrics, tearsheet, attribution | `Evaluation/` | Implemented |
+| Shared config, calendar, logging, IO | `Common/` | Implemented |
 
 ---
 
@@ -64,14 +64,15 @@ customized/
     test/
   Strategy/
     BackTest/             vectorised + event-driven simulation engines
-    Library/              concrete strategy definitions
+    Library/              concrete strategy definitions (TOML)
     test/
   Evaluation/             performance metrics + reports
     test/
   DataSource/lake/        raw bar lake + DuckDB catalog (git-ignored)
   Metrics/                wide feature matrices (git-ignored)
-  Results/                backtest artifacts (git-ignored)
-  scripts/                PowerShell helpers (check-env.ps1, run-pipeline.ps1)
+  Results/                signal reports + backtest artifacts (git-ignored)
+  scripts/                check-env.ps1, run-pipeline.ps1
+  conftest.py             shared pytest fixtures
   pyproject.toml
   spec.md
 ```
@@ -227,8 +228,8 @@ Per symbol, written to
 `[0.25, 4]`), `max_gap_days`, `repaired_ratio`, `zero_volume_ratio`.
 
 **To add:** a `--fail-on` threshold set so scheduled runs exit non-zero when data
-health degrades, and a calendar-aware `missing_sessions` count (needs the trading
-calendar from `Common/`).
+health degrades, and a calendar-aware `missing_sessions` count on top of
+`Common.calendar.TradingCalendar.missing_sessions`.
 
 ### 4.7 CLI
 
@@ -256,21 +257,24 @@ compression `zstd`.
 
 ---
 
-## 5. Module: MetricsGeneration — *implemented, requires alignment*
+## 5. Module: MetricsGeneration — *implemented*
 
 **Purpose.** Turn per-symbol OHLCV into a wide feature panel plus forward-return
 labels. Covers the original "data analysis" requirement: cleaning lives in
 `DataAcquisition`, enrichment lives here.
 
-### 5.1 Known Gaps (must be fixed)
+### 5.1 Resolved Alignment
 
-| Gap | Fix |
+| Former gap | Resolution |
 |---|---|
-| Reads CSV from `DataSource/US/Stock/day`, bypassing the Parquet lake | Read via `DataAcquisition.read_bars(partition, symbols)` |
-| No `__init__.py` | Add, exporting `build()`, `assemble_metric()`, `read_matrix()` |
-| No `test/` folder | Add, per §2 rule 2 |
-| Uses raw `close` instead of `adj_close` | Return/momentum/volatility features must use the **adjusted** series; only liquidity features use raw price |
-| Full rebuild every run (~190 s over 5.4k symbols) | Incremental mode keyed on the manifest `end` date |
+| Read CSV from `DataSource/US/Stock/day`, bypassing the Parquet lake | Reads via `DataAcquisition.read_symbol(symbol, partition)`; output lands in `Metrics/{region}/{asset_class}/{interval}/` |
+| No `__init__.py` | Exports `build()`, `assemble_metric()`, `read_matrix()`, `compute_metrics()`, `min_periods()` |
+| No `test/` folder | `test_offline.py`, `test_lookahead.py`, `test_live.py` |
+| Used raw `close` instead of `adj_close` | Return / momentum / volatility / shape / oscillator families use the adjusted series; only liquidity uses the raw traded price |
+| Full rebuild every run | `--incremental` compares the manifest `end` against the newest bar in the lake and skips when nothing is new |
+
+`dividend` and `split_ratio` are carried through into the panel so the backtest
+can apply corporate actions without re-reading the lake.
 
 ### 5.2 Feature Blocks
 
@@ -312,7 +316,7 @@ Labels, in a separate directory: `fwd_ret_1d`, `fwd_ret_5d`, `fwd_ret_21d`.
 
 ---
 
-## 6. Module: Common — *to build*
+## 6. Module: Common — *implemented*
 
 Shared primitives, so the same logic is not reimplemented three times.
 
@@ -329,7 +333,7 @@ Shared primitives, so the same logic is not reimplemented three times.
 
 ---
 
-## 7. Module: Signals — *to build*
+## 7. Module: Signals — *implemented*
 
 **Purpose.** Map the feature panel to a per-symbol, per-date alpha score. A
 signal is an opinion, not a position.
@@ -370,7 +374,7 @@ Written to `Results/signals/{signal_name}/report.parquet` plus a plot bundle.
 
 ---
 
-## 8. Module: Portfolio — *to build*
+## 8. Module: Portfolio — *implemented*
 
 **Purpose.** Convert alpha scores into target weights, subject to constraints.
 
@@ -401,7 +405,7 @@ Written to `Results/signals/{signal_name}/report.parquet` plus a plot bundle.
 
 ---
 
-## 9. Module: Strategy / BackTest — *to build*
+## 9. Module: Strategy / BackTest — *implemented*
 
 **Purpose.** Simulate the P&L of `target_weights` against historical bars with
 realistic frictions.
@@ -478,7 +482,7 @@ For any strategy expressible in both, they must produce an identical
 
 ---
 
-## 10. Module: Evaluation — *to build*
+## 10. Module: Evaluation — *implemented*
 
 **Purpose.** Turn a `BacktestResult` into a judgement.
 
@@ -530,8 +534,10 @@ Required correctness tests:
 6. **Idempotence** — ingesting twice adds zero rows; building metrics twice
    produces identical files.
 
-Standardise on `pytest`, replacing the bespoke harness in
-`DataAcquisition/test/harness.py`.
+Standardised on `pytest`. `Common/test/`, `DataAcquisition/test/`,
+`MetricsGeneration/test/`, `Signals/test/`, `Portfolio/test/`, `Strategy/test/`
+and `Evaluation/test/` each hold an offline suite; live suites are marked
+`@pytest.mark.live` and skipped unless `QUANT_LIVE_TESTS=1`.
 
 ---
 
@@ -542,32 +548,32 @@ Standardise on `pytest`, replacing the bespoke harness in
 ```powershell
 python -m DataAcquisition universe
 python -m DataAcquisition update   --interval 1d
-python -m DataAcquisition quality  --interval 1d --fail-on stale_days=5
+python -m DataAcquisition quality  --interval 1d
 python -m MetricsGeneration build  --incremental
-python -m Strategy backtest --spec Strategy/Library/momentum.toml
-python -m Evaluation report --run latest
+python -m Strategy backtest --spec momentum
+python -m Evaluation report --strategy momentum --run latest
 ```
 
 Wrapped in `scripts/run-pipeline.ps1`, exiting non-zero on any stage failure.
+`scripts/check-env.ps1` gates the run by verifying the interpreter, the packages,
+the lake and the feature panel.
 
 ### 12.2 Dependencies
 
-Consolidate the three `requirements.txt` files into one `pyproject.toml` with
-optional groups, resolving the current conflicts (`pyarrow>=17` vs
-`pyarrow==25.0.1`; two different `yfinance` pins).
+One `pyproject.toml` with optional groups; the per-module `requirements.txt`
+files and their conflicting pins are gone.
 
 ```
 core:      pandas, pyarrow, duckdb, numpy
 acquire:   yfinance, requests
 metrics:   scipy
-backtest:  own engine; vectorbt/backtrader only if a dependency is justified
-report:    matplotlib, jinja2
+backtest:  own engine
+report:    matplotlib
 dev:       pytest, ruff, mypy
 ```
 
-The VS Code tasks reference `scripts/check-env.ps1` and `scripts/lean.ps1`
-(QuantConnect LEAN), neither of which exists. Either create `scripts/` or delete
-those tasks — a broken task is worse than no task.
+Install with `pip install -e ".[all]"`. The VS Code tasks drive
+`scripts/check-env.ps1` and `scripts/run-pipeline.ps1`, both of which exist.
 
 ### 12.3 Reproducibility
 
@@ -579,12 +585,15 @@ a result.
 
 ## 13. Build Order
 
+All stages below are implemented; the order records how the system was built and
+which dependencies each stage assumed.
+
 1. `Common/` — config, calendar, logging, IO. Everything else depends on it.
 2. Align `MetricsGeneration/` to the lake and to `adj_close`; add tests.
-3. The lookahead test harness — build it *before* the strategy code, so the
-   strategy is validated from day one.
-4. `Signals/` with two reference signals (12-1 momentum, short-term reversal)
-   plus the IC/turnover report.
+3. The lookahead test harness, built *before* the strategy code, so the strategy
+   is validated from day one.
+4. `Signals/` with reference signals (12-1 momentum, short-term reversal,
+   low volatility) plus the IC/turnover report.
 5. `Portfolio/` with `QuantileLongShort` and the constraint chain.
 6. `Strategy/BackTest/` vectorised engine plus the cost model.
 7. `Evaluation/` tearsheet.

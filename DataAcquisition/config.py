@@ -1,29 +1,41 @@
 """Paths and defaults for the data acquisition module.
 
-Every location can be relocated by setting the ``QUANT_DATA_ROOT`` environment
-variable, which keeps the lake out of the repository when needed.
+A lazy view over :mod:`Common.config`: the familiar constants are resolved on
+every attribute access rather than frozen at import, so redirecting
+``QUANT_DATA_ROOT`` after import still moves the whole module.
 """
 
 from __future__ import annotations
 
-import os
-from pathlib import Path
+from typing import Any
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+from Common.config import PROJECT_ROOT, settings
 
-DATA_ROOT = Path(os.environ.get("QUANT_DATA_ROOT") or PROJECT_ROOT / "DataSource")
-LAKE_ROOT = DATA_ROOT / "lake"
-BARS_ROOT = LAKE_ROOT / "bars"
-REFERENCE_ROOT = LAKE_ROOT / "reference"
-REPORT_ROOT = LAKE_ROOT / "reports"
-CATALOG_PATH = LAKE_ROOT / "catalog.duckdb"
+_DERIVED = {
+    "DATA_ROOT": "data_root",
+    "LAKE_ROOT": "lake_root",
+    "BARS_ROOT": "bars_root",
+    "REFERENCE_ROOT": "reference_root",
+    "REPORT_ROOT": "report_root",
+    "CATALOG_PATH": "catalog_path",
+    # Legacy one-CSV-per-symbol layout kept for the migration command.
+    "LEGACY_CSV_ROOT": "data_root",
+    "DEFAULT_PROVIDER": "provider",
+    "DEFAULT_REGION": "region",
+    "DEFAULT_ASSET_CLASS": "asset_class",
+    "DEFAULT_INTERVAL": "interval",
+    "PARQUET_COMPRESSION": "compression",
+}
 
-DEFAULT_PROVIDER = "yahoo"
-DEFAULT_REGION = "US"
-DEFAULT_ASSET_CLASS = "stock"
-DEFAULT_INTERVAL = "1d"
+__all__ = ["PROJECT_ROOT", *_DERIVED]
 
-PARQUET_COMPRESSION = "zstd"
 
-# Legacy one-CSV-per-symbol layout kept for the migration command.
-LEGACY_CSV_ROOT = DATA_ROOT
+def __getattr__(name: str) -> Any:
+    try:
+        return getattr(settings(), _DERIVED[name])
+    except KeyError:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}") from None
+
+
+def __dir__() -> list[str]:
+    return sorted(__all__)

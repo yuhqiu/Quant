@@ -1,4 +1,0 @@
-yfinance==1.4.1
-backtrader==1.9.78.123
-vectorbt==1.1.0
-pyarrow==25.0.1

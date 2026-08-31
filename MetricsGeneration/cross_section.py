@@ -16,9 +16,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from Common.io import matrix_path, read_matrix, write_matrix
 from MetricsGeneration.indicators import ANNUALIZE, TRADING_DAYS
-from MetricsGeneration.storage import matrix_path, read_matrix, write_matrix
-
 
 RANK_SOURCES = ("ret_21d", "mom_12_1", "vol_20d", "advd_20", "rsi_14")
 ZSCORE_SOURCES = ("ret_21d", "mom_12_1")
@@ -57,24 +56,37 @@ def build_market_returns(daily_returns: pd.DataFrame) -> pd.Series:
 def market_relative(
     daily_returns: pd.DataFrame,
     market_returns: pd.Series,
+    chunk_size: int = 500,
 ) -> dict[str, pd.DataFrame]:
-    rolling = daily_returns.rolling(BETA_WINDOW, min_periods=BETA_MIN_PERIODS)
+    """Beta, correlation and idiosyncratic volatility against the market proxy.
 
-    covariance = rolling.cov(market_returns)
+    Rolling covariance over a five-thousand-column panel would allocate several
+    gigabytes at once, so symbols are processed in column blocks and cast down to
+    float32 as each block finishes.
+    """
     market_variance = market_returns.rolling(
         BETA_WINDOW, min_periods=BETA_MIN_PERIODS
     ).var()
-    correlation = rolling.corr(market_returns)
-    total_volatility = rolling.std()
+    safe_variance = market_variance.replace(0.0, np.nan)
 
-    beta = covariance.div(market_variance.replace(0.0, np.nan), axis=0)
-    idiosyncratic = total_volatility * np.sqrt((1.0 - correlation**2).clip(lower=0.0))
-
-    return {
-        "beta_252d": beta,
-        "corr_mkt_252d": correlation,
-        "idio_vol_252d": idiosyncratic * ANNUALIZE,
+    blocks: dict[str, list[pd.DataFrame]] = {
+        "beta_252d": [], "corr_mkt_252d": [], "idio_vol_252d": []
     }
+    columns = list(daily_returns.columns)
+
+    for start in range(0, len(columns), chunk_size):
+        block = daily_returns[columns[start : start + chunk_size]]
+        rolling = block.rolling(BETA_WINDOW, min_periods=BETA_MIN_PERIODS)
+
+        correlation = rolling.corr(market_returns)
+        beta = rolling.cov(market_returns).div(safe_variance, axis=0)
+        idiosyncratic = rolling.std() * np.sqrt((1.0 - correlation**2).clip(lower=0.0))
+
+        blocks["beta_252d"].append(beta.astype("float32"))
+        blocks["corr_mkt_252d"].append(correlation.astype("float32"))
+        blocks["idio_vol_252d"].append((idiosyncratic * ANNUALIZE).astype("float32"))
+
+    return {name: pd.concat(parts, axis=1) for name, parts in blocks.items()}
 
 
 def run(metrics_dir: Path, verbose: bool = True) -> list[str]:

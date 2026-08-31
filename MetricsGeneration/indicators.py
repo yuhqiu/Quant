@@ -2,6 +2,10 @@
 
 Every function here is pure: it takes a single symbol's OHLCV frame indexed by date
 and returns values aligned to that same index. No I/O, no cross-symbol dependencies.
+
+Return, momentum, volatility and shape families are computed on the **adjusted**
+price series, because a split or a dividend is not a return. Liquidity features
+use the **raw** traded price, because that is the money that actually changed hands.
 """
 
 from __future__ import annotations
@@ -9,16 +13,41 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-
 TRADING_DAYS = 252
 ANNUALIZE = float(np.sqrt(TRADING_DAYS))
 
-BASE_COLUMNS = ("open", "high", "low", "close", "volume", "repaired")
+BASE_COLUMNS = (
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
+    "adj_close",
+    "adj_factor",
+    "dividend",
+    "split_ratio",
+    "repaired",
+)
+
+OHLC_COLUMNS = ("open", "high", "low", "close")
 
 LABEL_COLUMNS = ("fwd_ret_1d", "fwd_ret_5d", "fwd_ret_21d")
 
 # Prices keep full precision; derived features are fine at single precision.
-FLOAT64_COLUMNS = frozenset({"open", "high", "low", "close", "volume", "obv", "dollar_vol"})
+FLOAT64_COLUMNS = frozenset(
+    {
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "adj_close",
+        "dividend",
+        "split_ratio",
+        "obv",
+        "dollar_vol",
+    }
+)
 
 
 def _wilder(series: pd.Series, window: int) -> pd.Series:
@@ -38,6 +67,36 @@ def _rolling_mean_abs_dev(values: np.ndarray, window: int) -> np.ndarray:
     means = windows.mean(axis=1)
     result[window - 1 :] = np.abs(windows - means[:, None]).mean(axis=1)
     return result
+
+
+def with_adjustments(frame: pd.DataFrame) -> pd.DataFrame:
+    """Guarantee ``adj_close`` and ``adj_factor`` exist, deriving them when absent."""
+    result = frame.copy()
+    close = result["close"]
+
+    if "adj_close" not in result.columns:
+        if "adj_factor" in result.columns:
+            result["adj_close"] = close * result["adj_factor"]
+        else:
+            result["adj_close"] = close
+
+    adjusted = result["adj_close"].where(result["adj_close"] > 0.0)
+    result["adj_close"] = adjusted.ffill().fillna(close)
+    result["adj_factor"] = _safe_div(result["adj_close"], close).fillna(1.0)
+
+    if "repaired" not in result.columns:
+        result["repaired"] = 0.0
+    return result
+
+
+def adjusted_ohlc(frame: pd.DataFrame) -> pd.DataFrame:
+    """Split- and dividend-adjusted OHLC, scaled by the same factor as the close."""
+    factor = frame["adj_factor"]
+    adjusted = pd.DataFrame(
+        {name: frame[name] * factor for name in OHLC_COLUMNS}, index=frame.index
+    )
+    adjusted["close"] = frame["adj_close"]
+    return adjusted
 
 
 def true_range(high: pd.Series, low: pd.Series, close: pd.Series) -> pd.Series:
@@ -249,14 +308,19 @@ def _reversion_block(frame: pd.DataFrame, metrics: dict[str, pd.Series]) -> None
 
 def compute_metrics(frame: pd.DataFrame) -> pd.DataFrame:
     """Compute every point-in-time metric for one symbol's OHLCV frame."""
-    metrics: dict[str, pd.Series] = {column: frame[column] for column in BASE_COLUMNS}
+    frame = with_adjustments(frame)
+    adjusted = adjusted_ohlc(frame)
 
-    _returns_block(frame, metrics)
-    _momentum_block(frame, metrics)
-    _volatility_block(frame, metrics)
-    _shape_block(frame, metrics)
+    metrics: dict[str, pd.Series] = {
+        column: frame[column] for column in BASE_COLUMNS if column in frame.columns
+    }
+
+    _returns_block(adjusted, metrics)
+    _momentum_block(adjusted, metrics)
+    _volatility_block(adjusted, metrics)
+    _shape_block(adjusted, metrics)
     _liquidity_block(frame, metrics)
-    _reversion_block(frame, metrics)
+    _reversion_block(adjusted, metrics)
 
     result = pd.DataFrame(metrics, index=frame.index)
     return result.replace([np.inf, -np.inf], np.nan)
@@ -264,7 +328,7 @@ def compute_metrics(frame: pd.DataFrame) -> pd.DataFrame:
 
 def compute_labels(frame: pd.DataFrame) -> pd.DataFrame:
     """Forward returns. Lookahead by construction, kept in a separate dataset."""
-    close = frame["close"]
+    close = with_adjustments(frame)["adj_close"]
     labels = {
         f"fwd_ret_{horizon}d": close.shift(-horizon) / close - 1.0
         for horizon in (1, 5, 21)
@@ -274,3 +338,54 @@ def compute_labels(frame: pd.DataFrame) -> pd.DataFrame:
 
 def metric_dtype(name: str) -> str:
     return "float64" if name in FLOAT64_COLUMNS else "float32"
+
+
+def metric_names() -> tuple[str, ...]:
+    """Every metric ``compute_metrics`` produces, in output order."""
+    index = pd.date_range("2020-01-01", periods=3, freq="D", tz="UTC")
+    probe = pd.DataFrame(
+        {
+            "open": 1.0,
+            "high": 1.0,
+            "low": 1.0,
+            "close": 1.0,
+            "volume": 1.0,
+            "adj_close": 1.0,
+            "dividend": 0.0,
+            "split_ratio": 0.0,
+            "repaired": 0.0,
+        },
+        index=index,
+    )
+    return tuple(compute_metrics(probe).columns)
+
+
+def min_periods(metric: str) -> int:
+    """Bars of history a metric needs before it stops being NaN."""
+    return MIN_PERIODS.get(metric, 1)
+
+
+# Declared warm-up per feature. Leading values stay NaN: never forward-filled,
+# never zero-filled, because a zero is a claim and a NaN is an absence.
+MIN_PERIODS: dict[str, int] = {
+    "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1,
+    "adj_close": 1, "adj_factor": 1, "dividend": 1, "split_ratio": 1, "repaired": 1,
+    "ret_1d": 2, "logret_1d": 2, "ret_5d": 6, "ret_21d": 22, "ret_63d": 64,
+    "ret_126d": 127, "ret_252d": 253, "ret_overnight": 2, "ret_intraday": 1,
+    "mom_12_1": 253, "px_to_sma_10": 10, "px_to_sma_20": 20, "px_to_sma_50": 50,
+    "px_to_sma_200": 200, "sma_50_to_200": 200, "dist_52w_high": 252,
+    "dist_52w_low": 252, "rsi_14": 15, "macd_line": 26, "macd_signal": 34,
+    "macd_hist": 34, "adx_14": 28,
+    "vol_20d": 21, "vol_60d": 61, "vol_252d": 253, "parkinson_20d": 20,
+    "garman_klass_20d": 20, "yang_zhang_20d": 21, "atr_14": 15, "natr_14": 15,
+    "downside_dev_60d": 61,
+    "sharpe_252d": 253, "sortino_252d": 253, "skew_252d": 253, "kurt_252d": 253,
+    "dd_from_252d_high": 1, "max_dd_252d": 252, "hit_rate_252d": 253,
+    "dollar_vol": 1, "advd_20": 20, "advd_60": 60, "amihud_60d": 61,
+    "vol_zscore_20": 20, "obv": 1, "dist_vwap_20": 20, "zero_vol_frac_20": 20,
+    "stale_px_frac_20": 21,
+    "bb_pctb_20": 20, "bb_width_20": 20, "zscore_20": 20, "stoch_k_14": 14,
+    "stoch_d_14": 16, "willr_14": 14, "cci_20": 20,
+    "beta_252d": 126, "corr_mkt_252d": 126, "idio_vol_252d": 126,
+    "rel_ret_21d": 22, "mkt_ret_1d": 2,
+}
